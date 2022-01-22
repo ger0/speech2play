@@ -4,6 +4,7 @@ import glob
 import difflib
 import speech_recognition as sr
 import serial
+import time
 import vlc
 
 AUDIO_EXTS = '*.mp3'
@@ -12,19 +13,20 @@ AUDIO_PATH = '/home/pi/Music/'
 # list of audio files 
 files = glob.glob(AUDIO_PATH + AUDIO_EXTS)
 
+# arduino serial for LCD
+ser = serial.Serial('/dev/ttyACM0', 9600)
+ser.reset_input_buffer()
+ser.reset_output_buffer()
+
 # microphone
 r = sr.Recognizer()
 m = sr.Microphone()
-
-# arduino serial for LCD
-ser = serial.Serial('/dev/ttyACM0', 9600, timeout = 1)
-ser.reset_input_buffer()
 
 # is a song playing?
 isPlaying   = False
 # is the program running?
 isRunning   = True
-shouldEcho  = False
+shouldEcho  = True 
 nowPlaying  = ''
 # Media player in this case VLC
 player = vlc.MediaPlayer()
@@ -34,26 +36,34 @@ LCD_CLEAR   = "$INPUT:CLEAR"
 LCD_PLAY    = "$INPUT:NOW_PLAYING"
 LCD_SPEAK   = "$INPUT:SPEAK_NOW"
 
-def printLCD(var, force = False):
-    if (shouldEcho or force):
+CYCLE_THRESHOLD = 10
+responseCycles = 0
+
+def printLCD(var):
+    if (shouldEcho):
         ser.write((var + '\n').encode('ascii'))
 
 def synthesize(string):
     call(["espeak", string])
 
 def listen(short = False):
+    global responseCycles
     with sr.Microphone() as source:
         printLCD(LCD_CLEAR)
         if (shouldEcho):
             synthesize("What would you want me to do?")
-        r.adjust_for_ambient_noise(source)
+        # adusting for noise
+        if (not short or responseCycles > CYCLE_THRESHOLD):
+            r.adjust_for_ambient_noise(source)
         # mark it on display
         printLCD(LCD_SPEAK)
 
         if (short):
-            audio = r.record(source, duration = 3)
+            #audio = r.record(source, duration = 3)
+            audio = r.listen(source)
+            responseCycles += 1
         else:
-            audio = r.record(source, duration = 6)
+            audio = r.listen(source)
 
         printLCD(LCD_CLEAR)
         if (shouldEcho):
@@ -61,9 +71,11 @@ def listen(short = False):
         return audio
 
 def recognize_voice(audio):
+    global responseCycles
     try:
         text = r.recognize_google(audio)
-        #print("you said: " + text)
+        print("you said: " + text)
+        responseCycles = 0
         return text
     except sr.UnknownValueError:
         #print("Google Speech Recognition could not understand")
@@ -117,12 +129,16 @@ def parse(data):
             return True
         elif (command[0] == 'exit'):
             isRunning = False
+            printLCD("start speech2play")
             return True 
     # didn't recognize
     synthesize("Couldn't undrstand, please repeat")
     return False
 
-printLCD(LCD_CLEAR, force=True)
+# is this neccessary? 
+time.sleep(5)
+printLCD(LCD_CLEAR)
+shouldEcho = False
 while isRunning:
     audio       = listen(short=True)
     voice_line  = recognize_voice(audio)
@@ -140,3 +156,5 @@ while isRunning:
                         printLCD(nowPlaying)
                     shouldEcho = False
                     break
+# poweroff
+call(['sudo', 'shutdown', '-h', 'now'])
