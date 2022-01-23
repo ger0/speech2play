@@ -6,12 +6,27 @@ import speech_recognition as sr
 import serial
 import time
 import vlc
+import sys
+import logging
 
-AUDIO_EXTS = '*.mp3'
+logger = logging.getLogger('')
+logger.setLevel(logging.DEBUG)
+fh = logging.FileHandler('tmp.log')
+sh = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter(
+        '[%(asctime)s] %(levelname)s %(message)s',
+        datefmt='%a, %d %b %Y %H:%M:%S'
+)
+fh.setFormatter(formatter)
+sh.setFormatter(formatter)
+logger.addHandler(fh)
+logger.addHandler(sh)
+
+AUDIO_EXTS = '.mp3'
 AUDIO_PATH = '/home/pi/Music/'
 
 # list of audio files 
-files = glob.glob(AUDIO_PATH + AUDIO_EXTS)
+files = glob.glob(AUDIO_PATH + '*' + AUDIO_EXTS)
 
 # arduino serial for LCD
 ser = serial.Serial('/dev/ttyACM0', 9600)
@@ -59,8 +74,8 @@ def listen(short = False):
         printLCD(LCD_SPEAK)
 
         if (short):
-            #audio = r.record(source, duration = 3)
-            audio = r.listen(source)
+            audio = r.record(source, duration = 2)
+            #audio = r.listen(source)
             responseCycles += 1
         else:
             audio = r.listen(source)
@@ -74,18 +89,18 @@ def recognize_voice(audio):
     global responseCycles
     try:
         text = r.recognize_google(audio)
-        print("you said: " + text)
         responseCycles = 0
+        logger.info("you said: " + text)
         return text
     except sr.UnknownValueError:
-        #print("Google Speech Recognition could not understand")
+        #logger.info("Google Speech Recognition could not understand")
         return ''
     except sr.RequestError:
-        #print("Could not request results from Google")
+        logger.warning("Could not request results from Google")
         return ''
 
 def trimFilename(filename):
-    temp = filename.rstrip(AUDIO_EXTS)
+    temp = filename.split(AUDIO_EXTS)[0]
     temp = temp.lstrip(AUDIO_PATH)
     return temp
 
@@ -107,6 +122,7 @@ def parse(data):
             filename = matchKeywords(command[1:])
             if (len(filename) == 0):
                 synthesize("Couldn't match a song")
+                logger.info("Couldn't match any song")
                 return True
             else:
                 filename = filename[0]
@@ -117,6 +133,7 @@ def parse(data):
                 # initiate vlc
                 player = vlc.MediaPlayer(filename)
                 player.play()
+                logger.info("Playing a song: " + nowPlaying)
                 return True
         # stop playing 
         elif (command[0] == 'stop' and isPlaying):
@@ -124,19 +141,22 @@ def parse(data):
             nowPlaying = ''
             player.stop()
             printLCD(LCD_CLEAR)
+            logger.info("Stopping playback")
             return True
         elif (command[0] == 'nothing'):
             return True
         elif (command[0] == 'exit'):
+            printLCD("exiting")
+            player.stop()
             isRunning = False
-            printLCD("start speech2play")
             return True 
     # didn't recognize
-    synthesize("Couldn't undrstand, please repeat")
+    synthesize("Couldn't understand, please repeat")
     return False
 
 # is this neccessary? 
 time.sleep(5)
+logger.info("initialising...")
 printLCD(LCD_CLEAR)
 shouldEcho = False
 while isRunning:
@@ -157,4 +177,5 @@ while isRunning:
                     shouldEcho = False
                     break
 # poweroff
+logger.info("Shutting down...")
 call(['sudo', 'shutdown', '-h', 'now'])
