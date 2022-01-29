@@ -37,22 +37,20 @@ ser.reset_output_buffer()
 r = sr.Recognizer()
 m = sr.Microphone()
 
-# is a song playing?
-isPlaying   = False
 # is the program running?
 isRunning   = True
 shouldEcho  = True 
 nowPlaying  = ''
 # Media player in this case VLC
-player = vlc.MediaPlayer()
+player  = vlc.MediaPlayer()
 
 # find a cleaner way?
 LCD_CLEAR   = "$INPUT:CLEAR"
 LCD_PLAY    = "$INPUT:NOW_PLAYING"
 LCD_SPEAK   = "$INPUT:SPEAK_NOW"
 
-CYCLE_THRESHOLD = 10
-responseCycles = 0
+CYCLE_THRESHOLD = 5
+responseCycles = 10
 
 def printLCD(var):
     if (shouldEcho):
@@ -69,12 +67,15 @@ def listen(short = False):
             synthesize("What would you want me to do?")
         # adusting for noise
         if (not short or responseCycles > CYCLE_THRESHOLD):
+            print("Adjusting for ambient noise...")
             r.adjust_for_ambient_noise(source)
+            responseCycles = 0;
         # mark it on display
         printLCD(LCD_SPEAK)
 
+        print("Listening now...")
         if (short):
-            audio = r.record(source, duration = 2)
+            audio = r.record(source, duration = 3)
             #audio = r.listen(source)
             responseCycles += 1
         else:
@@ -86,10 +87,8 @@ def listen(short = False):
         return audio
 
 def recognize_voice(audio):
-    global responseCycles
     try:
         text = r.recognize_google(audio)
-        responseCycles = 0
         logger.info("you said: " + text)
         return text
     except sr.UnknownValueError:
@@ -105,11 +104,15 @@ def trimFilename(filename):
     return temp
 
 def matchKeywords(str_list):
-    return difflib.get_close_matches(' '.join(str_list), files, 1, 0.1)
+    return difflib.get_close_matches(' '.join(str_list), files, 1, 0.2)
+
+def printPlaying():
+    if (player.is_playing() == 1):
+        printLCD(LCD_PLAY)
+        printLCD(nowPlaying)
 
 # returns True if parsed correctly
 def parse(data):
-    global isPlaying
     global isRunning
     global nowPlaying
     global player
@@ -126,22 +129,26 @@ def parse(data):
                 return True
             else:
                 filename = filename[0]
-                isPlaying = True
                 synthesize("Playing a song")
                 # save the name of a song
                 nowPlaying = trimFilename(filename)
                 # initiate vlc
-                player = vlc.MediaPlayer(filename)
+                media = vlc.Media(filename)
+                player.set_media(media)
                 player.play()
                 logger.info("Playing a song: " + nowPlaying)
+
+                # force printLCD
+                printLCD(LCD_PLAY)
+                printLCD(nowPlaying)
                 return True
         # stop playing 
-        elif (command[0] == 'stop' and isPlaying):
-            isPlaying = False
-            nowPlaying = ''
-            player.stop()
-            printLCD(LCD_CLEAR)
-            logger.info("Stopping playback")
+        elif (command[0] == 'stop'):
+            if (player.is_playing() == 1):
+                player.stop()
+                nowPlaying = '' 
+                printLCD(LCD_CLEAR)
+                logger.info("Stopping playback")
             return True
         elif (command[0] == 'nothing'):
             return True
@@ -171,9 +178,7 @@ while isRunning:
             voice_line = recognize_voice(audio)
             if (voice_line != False):
                 if (parse(voice_line)):
-                    if (isPlaying):
-                        printLCD(LCD_PLAY)
-                        printLCD(nowPlaying)
+                    printPlaying()
                     shouldEcho = False
                     break
 # poweroff
